@@ -1,0 +1,34 @@
+name: windflow 
+channels:
+  - conda-forge
+  - pytorch
+dependencies:
+  - python=3.8
+  - xarray
+  - cudatoolkit=10.1
+  - cudatoolkit-dev
+  - numpy
+  - pandas
+  - dask
+  - xarray
+  - scikit-learn
+  - scipy
+  - jupyter
+  - jupyterlab
+  - notebook
+  - ipykernel
+  - matplotlib
+  - seaborn
+  - pytorch=1.4
+  - torchvision
+  - boto3
+  - basemap
+  - netcdf4
+  - opencv
+  - zarr
+  - mpi4py
+  - voila
+  - pip
+  - ipywidgets
+  - pip:
+      - git+https://github.com/xarray-contrib/xoak
