@@ -7,6 +7,7 @@ dependencies:
   - xarray
   - cudatoolkit=10.1
   - cudatoolkit-dev
+  - tensorboard
   - numpy
   - pandas
   - dask
