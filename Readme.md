@@ -1,5 +1,7 @@
 # WindFlow: Dense feature tracking of atmospheric winds with deep optical flow
 
+(Manuscript in submission)
+
 ## Setup
 
 ```
