@@ -1,6 +1,6 @@
 # WindFlow: Dense feature tracking of atmospheric winds with deep optical flow
 
-(Manuscript in submission)
+Vandal, T., Duffy, K., McCarty, W., Sewnath, A., & Nemani, R. (2022). Dense feature tracking of atmospheric winds with deep optical flow, Proceedings of the 28th ACM SIGKDD Conference on Knowledge Discovery and Data Mining.
 
 ## Setup
 
