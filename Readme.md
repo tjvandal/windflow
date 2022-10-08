@@ -31,6 +31,8 @@ mpirun -np 4 python windflow/datasets/g5nr/g5nr.py data/G5NR data/G5NR_patches/
 python train.py --model_path models/raft-size_512/ --dataset g5nr --data_path data/G5NR_patches --model_name raft --batch_size 2 --loss L1 --max_iterations 500000 --lr 0.00001
 ```
 
+Trained model weights can be found here: `model_weights/windflow.raft.pth.tar`
+
 ## Perform Inference on G5NR Test Set
 
 On a single V100 GPU, inference applied to 1 files takes ~75 seconds.
@@ -47,7 +49,7 @@ CUDA_VISIBLE_DEVICES=0 python pipelines/g5nr/g5nr_to_flows.py --model_name raft
 Data access found here: https://registry.opendata.aws/noaa-goes/ 
 
 ```
-python pipelines/geo/geo_flows_to_zarr.py --checkpoint models/raft-size_512/checkpoint.pth.tar
+python pipelines/geo/geo_flows_to_zarr.py --checkpoint model_weights/windflow.raft.pth.tar
 ```
 
 ## Acknowledgements 
