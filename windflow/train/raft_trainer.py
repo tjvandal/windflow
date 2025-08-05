@@ -38,10 +38,10 @@ def unsupervised_sequence_loss(I0, I1, flow_pred, gamma=0.8):
     """Loss function unsupervised warping I1 to I0 with predicted flows"""
     warp = warper.BackwardWarp()
     loss = CharbonnierLoss(alpha=0.50)
-    
+ 
     n_predictions = len(flow_pred)
     flow_loss = 0.0
-    
+  
     for i in range(n_predictions):
         I0_i = warp(I1, flow_pred[i])
         i_weight = gamma**(n_predictions - i - 1)
@@ -49,7 +49,7 @@ def unsupervised_sequence_loss(I0, I1, flow_pred, gamma=0.8):
         flow_loss +=  (i_weight * i_loss).mean()
 
     return flow_loss
-    
+ 
 
 class RAFTTrainer(BaseTrainer):
     def __init__(self, model, model_path, iters=24, 
@@ -68,15 +68,9 @@ class RAFTTrainer(BaseTrainer):
                                                        pct_start=0.05, 
                                                        cycle_momentum=False, 
                                                        anneal_strategy='linear')
-    
-        
-    #def step(self, I0, I1, flow_gt, flow_init=None, log=False, train=True):
+
+
     def step(self, inputs, labels, flow_init=None, log=False, train=True):
-        if train:
-            tfwriter = self.tfwriter_train
-        else:
-            tfwriter = self.tfwriter_valid
- 
         with torch.cuda.amp.autocast():
             I0 = inputs[:,0]
             I1 = inputs[:,1]
@@ -92,36 +86,36 @@ class RAFTTrainer(BaseTrainer):
                 #self.scaler.step(self.optimizer)
                 #self.scalar.update()
                 self.scheduler.step()
- 
+
 
             if log and (self.rank == 0):
                 self.log_scalar(loss, 'total_loss', train)
                 self.log_flow_grid(labels[:,0], 'label', train)
                 self.log_image_grid(I0, 'data/I0', train)
                 self.log_image_grid(I1, 'data/I1', train)
- 
+
                 for i in range(0, self.iters, 2):
-                    self.log_flow_grid(flow_predictions[i], f'flows/iter_{i}', train)    
+                    self.log_flow_grid(flow_predictions[i], f'flows/iter_{i}', train)
             if train:
                 self.global_step = self.global_step + 1 
         return loss
 
-    
+
 class RAFTGuided(BaseTrainer):
     def __init__(self, model, model_path, iters=10, lambda_obs=0.1,
                  device=None, lr=1e-4, distribute=False, clip=1., rank=0):
         BaseTrainer.__init__(self, model, 'raft', model_path, lr=lr, 
-                             device=device, distribute=distribute, rank=rank)        
+                             device=device, distribute=distribute, rank=rank)
         self.iters = iters
         self.clip = clip
         self.lambda_obs = lambda_obs
-        
+
     def step(self, I0_obs, I1_obs, I0_phys, I1_phys, flow_phys, train=True, log=None):
         if train:
             tfwriter = self.tfwriter_train
         else:
             tfwriter = self.tfwriter_valid
-            
+
         with torch.cuda.amp.autocast():
             flow_predictions_phys = self.model(I0_phys, I1_phys, iters=self.iters)
             loss_guide = sequence_loss(flow_predictions_phys, flow_phys)

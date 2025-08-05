@@ -1,5 +1,7 @@
 import os, sys
 
+import wandb
+
 import torch
 import torch.nn as nn
 from torch import optim
@@ -32,19 +34,20 @@ class BaseTrainer(nn.Module):
         self.device = device
         self.distribute = distribute
         self.rank = rank
-        
+
         # NEW
         self.scaler = torch.cuda.amp.GradScaler()
-            
+
         self.checkpoint_filepath = os.path.join(model_path, 'checkpoint.pth.tar')
         if (rank == 0) and (not os.path.exists(model_path)):
             os.makedirs(model_path)
-        
+
         self.global_step = 0
         self._set_optimizer()
-        self._set_summary_writer()
+        # self._set_summary_writer()
+        self.wandb_run = wandb.init(project='windflow')
 
-        
+ 
     def _set_optimizer(self):
         # set optimizer
         #if self.rank == 0:
@@ -65,13 +68,13 @@ class BaseTrainer(nn.Module):
                 self.model.module.load_state_dict(checkpoint['model'])
             except:
                 self.model.load_state_dict(checkpoint['model'])
-                
+
             self.optimizer.load_state_dict(checkpoint['optimizer'])
             print("=> loaded checkpoint '{}' (Step {})"
                     .format(filename, self.global_step))
         else:
             print("=> no checkpoint found at '{}'".format(filename))
-        
+
     def save_checkpoint(self):
         if self.distribute:
             state = {'global_step': self.global_step, 
@@ -86,30 +89,50 @@ class BaseTrainer(nn.Module):
     def log_tensorboard(self):
         pass
 
+    '''
     def get_tfwriter(self, train):
         if train:
             return self.tfwriter_train
         else:
             return self.tfwriter_valid
-        
+    '''
+ 
+    def mode(self, train=True):
+        if train:
+            prefix = 'train'
+        else:
+            prefix = 'eval'
+        return prefix
+
+
     def log_scalar(self, x, name, train=True):
-        tfwriter = self.get_tfwriter(train)
-        tfwriter.add_scalar(name, x, self.global_step)
-    
+        # tfwriter = self.get_tfwriter(train)
+        # tfwriter.add_scalar(name, x, self.global_step)
+        prefix = self.mode(train=train)
+        self.wandb_run.log({f'{prefix}/{name}': x})
+
     def log_image_grid(self, img, name, train=True, N=4):
         '''
         img of shape (N, C, H, W)
         '''
-        tfwriter = self.get_tfwriter(train)
+        #tfwriter = self.get_tfwriter(train)
+        prefix = self.mode(train=train)
         img_grid = torchvision.utils.make_grid(img[:N])
-        tfwriter.add_image(name, scale_image(img_grid), self.global_step)
-        
+        logimg = wandb.Image(img_grid)
+        self.wandb_run.log({f'{prefix}/{name}': logimg})
+
     def log_flow_grid(self, flows, name, train=True, N=4):
-        tfwriter = self.get_tfwriter(train)
+        #tfwriter = self.get_tfwriter(train)
+        prefix = self.mode(train=train)
         U_grid = torchvision.utils.make_grid(flows[:N,:1])
         V_grid = torchvision.utils.make_grid(flows[:N,1:])
         intensity = (U_grid ** 2 + V_grid ** 2)**0.5
-        tfwriter.add_image(f'{name}/U', scale_image(U_grid), self.global_step)
-        tfwriter.add_image(f'{name}/V', scale_image(V_grid), self.global_step)
-        tfwriter.add_image(f'{name}/intensity', scale_image(intensity), self.global_step)
-        
+        #tfwriter.add_image(f'{name}/U', scale_image(U_grid), self.global_step)
+        #tfwriter.add_image(f'{name}/V', scale_image(V_grid), self.global_step)
+        #tfwriter.add_image(f'{name}/intensity', scale_image(intensity), self.global_step)
+        logs = {}
+        logs[f'{prefix}/{name}/U'] = wandb.Image(U_grid)
+        logs[f'{prefix}/{name}/V'] = wandb.Image(V_grid)
+        logs[f'{prefix}/{name}/Intensity'] = wandb.Image(intensity)
+        self.wandb_run.log(logs)
+
