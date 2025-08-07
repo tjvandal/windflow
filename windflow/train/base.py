@@ -1,138 +1,108 @@
-import os, sys
-
 import wandb
+from pytorch_lightning import LightningModule
 
 import torch
-import torch.nn as nn
-from torch import optim
-from torch.utils import data
-from torch.nn.parallel import DistributedDataParallel as DDP
-import torch.distributed as dist
-import torch.multiprocessing as mp
-from torch.utils.tensorboard import SummaryWriter # there is a bug with summarywriter importing
-
 import torchvision
+
 
 def scale_image(x):
     xmn = torch.min(x)
     xmx = torch.max(x)
     return (x - xmn) / (xmx - xmn)
 
-class BaseTrainer(nn.Module):
-    def __init__(self, model, 
-                 model_name, 
-                 model_path,
-                 lr=1e-4,
-                 device=None,
-                 distribute=False,
-                 rank=0):
-        super(BaseTrainer, self).__init__()
-        self.model = model
-        self.model_name = model_name
-        self.model_path = model_path
+
+class BaseTrainer(LightningModule):
+    def __init__(
+        self,
+        # model_name,
+        # model_path,
+        lr=1e-4,
+    ):
+        super().__init__()
+        # self.model_name = model_name
+        # self.model_path = model_path
         self.lr = lr
-        self.device = device
-        self.distribute = distribute
-        self.rank = rank
+        # self.global_step = 0
+        # self.wandb_run = wandb.init(project='windflow')
 
-        # NEW
-        self.scaler = torch.cuda.amp.GradScaler()
-
-        self.checkpoint_filepath = os.path.join(model_path, 'checkpoint.pth.tar')
-        if (rank == 0) and (not os.path.exists(model_path)):
-            os.makedirs(model_path)
-
-        self.global_step = 0
-        self._set_optimizer()
-        # self._set_summary_writer()
-        self.wandb_run = wandb.init(project='windflow')
-
- 
-    def _set_optimizer(self):
+    def configure_optimizers(self):
         # set optimizer
-        #if self.rank == 0:
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr, weight_decay=1e-4)
+        params_list = list(self.parameters())
+        optimizer = torch.optim.Adam(params_list, lr=self.lr, weight_decay=1e-4)
+        return optimizer
 
+    def init_from_ckpt(self, path, ignore_keys=list()):
+        sd = torch.load(path, map_location="cpu")["state_dict"]
+        keys = list(sd.keys())
+        for k in keys:
+            for ik in ignore_keys:
+                if k.startswith(ik):
+                    print("Deleting key {} from state_dict.".format(k))
+                    del sd[k]
+        self.load_state_dict(sd, strict=False)
+        print(f"Restored from {path}")
 
-    def _set_summary_writer(self):
-        self.tfwriter_train = SummaryWriter(os.path.join(self.model_path, 'train', 'tfsummary'))
-        self.tfwriter_valid = SummaryWriter(os.path.join(self.model_path, 'valid', 'tfsummary'))
+    def get_trainer(self):
+        try:
+            return getattr(self, "trainer", None)
+        except RuntimeError:  # not attached to a trainer
+            return None
 
-    def load_checkpoint(self):
-        filename = self.checkpoint_filepath
-        if os.path.isfile(filename):
-            print("loading checkpoint %s" % filename)
-            checkpoint = torch.load(filename)
-            self.global_step = checkpoint['global_step']
-            try:
-                self.model.module.load_state_dict(checkpoint['model'])
-            except:
-                self.model.load_state_dict(checkpoint['model'])
+    @property
+    def mode(self):
+        trainer = self.get_trainer()
+        if trainer is None:
+            return None
+        if trainer.sanity_checking:
+            return None
+        if trainer.testing:
+            return "test"
+        if trainer.predicting:
+            return "predict"
+        if trainer.evaluating:
+            return "eval"
+        if trainer.training:
+            return "train"
+        return None  # inference ?
 
-            self.optimizer.load_state_dict(checkpoint['optimizer'])
-            print("=> loaded checkpoint '{}' (Step {})"
-                    .format(filename, self.global_step))
-        else:
-            print("=> no checkpoint found at '{}'".format(filename))
-
-    def save_checkpoint(self):
-        if self.distribute:
-            state = {'global_step': self.global_step, 
-                     'model': self.model.module.state_dict(),
-                     'optimizer': self.optimizer.state_dict()}
-        else:
-            state = {'global_step': self.global_step, 
-                     'model': self.model.state_dict(),
-                     'optimizer': self.optimizer.state_dict()}
-        torch.save(state, self.checkpoint_filepath)        
-
-    def log_tensorboard(self):
-        pass
-
-    '''
-    def get_tfwriter(self, train):
-        if train:
-            return self.tfwriter_train
-        else:
-            return self.tfwriter_valid
-    '''
- 
-    def mode(self, train=True):
-        if train:
-            prefix = 'train'
-        else:
-            prefix = 'eval'
-        return prefix
-
-
-    def log_scalar(self, x, name, train=True):
+    def log_scalar(self, x, name):
         # tfwriter = self.get_tfwriter(train)
         # tfwriter.add_scalar(name, x, self.global_step)
-        prefix = self.mode(train=train)
-        self.wandb_run.log({f'{prefix}/{name}': x})
+        logger = self.logger.experiment
+        prefix = self.mode
+        logger.log({f"{prefix}/{name}": x})
 
-    def log_image_grid(self, img, name, train=True, N=4):
-        '''
+    def log_image_grid(self, img, name, N=4):
+        """
         img of shape (N, C, H, W)
-        '''
-        #tfwriter = self.get_tfwriter(train)
-        prefix = self.mode(train=train)
+        """
+        # tfwriter = self.get_tfwriter(train)
+        logger = self.logger.experiment
+        prefix = self.mode
         img_grid = torchvision.utils.make_grid(img[:N])
         logimg = wandb.Image(img_grid)
-        self.wandb_run.log({f'{prefix}/{name}': logimg})
+        logger.log({f"{prefix}/{name}": logimg})
 
-    def log_flow_grid(self, flows, name, train=True, N=4):
-        #tfwriter = self.get_tfwriter(train)
-        prefix = self.mode(train=train)
-        U_grid = torchvision.utils.make_grid(flows[:N,:1])
-        V_grid = torchvision.utils.make_grid(flows[:N,1:])
-        intensity = (U_grid ** 2 + V_grid ** 2)**0.5
-        #tfwriter.add_image(f'{name}/U', scale_image(U_grid), self.global_step)
-        #tfwriter.add_image(f'{name}/V', scale_image(V_grid), self.global_step)
-        #tfwriter.add_image(f'{name}/intensity', scale_image(intensity), self.global_step)
+    def log_flow_grid(self, flows, name, N=4):
+        prefix = self.mode
+        logger = self.logger.experiment
+        U_grid = torchvision.utils.make_grid(flows[:N, :1])
+        V_grid = torchvision.utils.make_grid(flows[:N, 1:])
+        intensity = (U_grid**2 + V_grid**2) ** 0.5
+        # tfwriter.add_image(f'{name}/U', scale_image(U_grid), self.global_step)
+        # tfwriter.add_image(f'{name}/V', scale_image(V_grid), self.global_step)
+        # tfwriter.add_image(f'{name}/intensity', scale_image(intensity), self.global_step)
         logs = {}
-        logs[f'{prefix}/{name}/U'] = wandb.Image(U_grid)
-        logs[f'{prefix}/{name}/V'] = wandb.Image(V_grid)
-        logs[f'{prefix}/{name}/Intensity'] = wandb.Image(intensity)
-        self.wandb_run.log(logs)
+        logs[f"{prefix}/{name}/U"] = wandb.Image(U_grid)
+        logs[f"{prefix}/{name}/V"] = wandb.Image(V_grid)
+        logs[f"{prefix}/{name}/Intensity"] = wandb.Image(intensity)
+        logger.log(logs)
 
+    def step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
+        raise NotImplementedError
+
+    def training_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
+        return self.step(batch, batch_idx)
+
+    def validation_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
+        return self.step(batch, batch_idx)
