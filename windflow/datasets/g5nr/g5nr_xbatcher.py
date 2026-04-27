@@ -17,8 +17,25 @@ from ..preprocess import image_histogram_equalization
 _FNAME_RE = re.compile(r'_(QV|U|V)_Nv\.(\d{8}_\d{4}z)\.nc4$')
 
 
-def _index_files_by_timestamp(directory):
-    files = glob.glob(os.path.join(directory, '*.nc4'))
+def _index_files_by_timestamp(directory, years=None):
+    """Discover paired (QV, U, V) .nc4 files under `directory`.
+
+    Supports two layouts:
+      - flat:   directory/c1440_NR.inst30mn_3d_{VAR}_Nv.{YYYYMMDD}_{HHMM}z.nc4
+      - NCCS:   directory/inst30mn_3d_{VAR}_Nv/Y{YYYY}/M{MM}/D{DD}/c1440_NR.*.nc4
+        e.g. /css/g5nr/Ganymed/7km/c1440_NR/DATA/0.0625_deg/inst
+
+    `years`: optional iterable of int years (e.g. [2005, 2006]) to restrict
+    NCCS-tree scans. Ignored for flat layouts.
+    """
+    year_globs = [f'Y{int(y)}' for y in years] if years else ['Y*']
+    files = []
+    for ydir in year_globs:
+        files.extend(glob.glob(os.path.join(
+            directory, 'inst30mn_3d_*_Nv', ydir, 'M*', 'D*', '*.nc4')))
+    if not files:
+        files = glob.glob(os.path.join(directory, '*.nc4'))
+
     rows = {}
     for f in files:
         m = _FNAME_RE.search(os.path.basename(f))
@@ -26,6 +43,8 @@ def _index_files_by_timestamp(directory):
             continue
         var, ts = m.group(1), m.group(2)
         rows.setdefault(ts, {})[var] = f
+    if not rows:
+        return pd.DataFrame(columns=['QV', 'U', 'V'])
     df = pd.DataFrame.from_dict(rows, orient='index').sort_index()
     df = df.dropna(subset=['QV', 'U', 'V'])
     return df[['QV', 'U', 'V']].reset_index(drop=True)
@@ -42,7 +61,7 @@ class G5NRXBatcherFlows(data.Dataset):
 
     def __init__(self, directory, mode='train', size=128, frames=2,
                  scale_factor=None, convert_cartesian=True,
-                 lat_bounds=(-80, 80), overlap=0, levels=None):
+                 lat_bounds=(-80, 80), overlap=0, levels=None, years=None):
         self.directory = directory
         self.mode = mode
         self.size = size
@@ -51,8 +70,9 @@ class G5NRXBatcherFlows(data.Dataset):
         self.convert_cartesian = convert_cartesian
         self.lat_bounds = lat_bounds
         self.levels = levels
+        self.years = years
 
-        df = _index_files_by_timestamp(directory)
+        df = _index_files_by_timestamp(directory, years=years)
         if len(df) == 0:
             raise RuntimeError(f'No QV/U/V .nc4 triples found in {directory}')
 

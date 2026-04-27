@@ -37,6 +37,7 @@ def train_net(params, rank=0):
         scale_factor=params["scale_input"],
         frames=params["input_frames"],
         levels=params["levels"],
+        years=params["years"],
     )
 
     data_params = {
@@ -135,6 +136,12 @@ if __name__ == "__main__":
         default=None,
         type=lambda s: [int(x) for x in s.split(",")] if s else None,
         help="Comma-separated vertical level indices (e.g. '64' or '60,64,68'). Default: all levels.",
+    )
+    parser.add_argument(
+        "--years",
+        default=None,
+        type=lambda s: [int(y) for y in s.split(",")] if s else None,
+        help="Comma-separated years to include (NCCS-tree layout only, e.g. '2005,2006'). Default: all years.",
     )
 
     args = parser.parse_args()
