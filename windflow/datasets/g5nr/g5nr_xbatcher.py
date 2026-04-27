@@ -1,6 +1,7 @@
 import os
 import re
 import glob
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -16,23 +17,15 @@ from ..preprocess import image_histogram_equalization
 
 _FNAME_RE = re.compile(r'_(QV|U|V)_Nv\.(\d{8}_\d{4}z)\.nc4$')
 
+# Sidecar caching the full (timestamp, QV, U, V) index. Saves a tree-walk
+# over NCCS layouts (~minutes for 2 years × 365 × 48 × 3 = 105k files).
+_INDEX_CACHE_NAME = '.g5nr_file_index.parquet'
 
-def _index_files_by_timestamp(directory, years=None):
-    """Discover paired (QV, U, V) .nc4 files under `directory`.
 
-    Supports two layouts:
-      - flat:   directory/c1440_NR.inst30mn_3d_{VAR}_Nv.{YYYYMMDD}_{HHMM}z.nc4
-      - NCCS:   directory/inst30mn_3d_{VAR}_Nv/Y{YYYY}/M{MM}/D{DD}/c1440_NR.*.nc4
-        e.g. /css/g5nr/Ganymed/7km/c1440_NR/DATA/0.0625_deg/inst
-
-    `years`: optional iterable of int years (e.g. [2005, 2006]) to restrict
-    NCCS-tree scans. Ignored for flat layouts.
-    """
-    year_globs = [f'Y{int(y)}' for y in years] if years else ['Y*']
-    files = []
-    for ydir in year_globs:
-        files.extend(glob.glob(os.path.join(
-            directory, 'inst30mn_3d_*_Nv', ydir, 'M*', 'D*', '*.nc4')))
+def _scan_files(directory):
+    """Walk `directory` once and return a DataFrame keyed by timestamp."""
+    files = glob.glob(os.path.join(
+        directory, 'inst30mn_3d_*_Nv', 'Y*', 'M*', 'D*', '*.nc4'))
     if not files:
         files = glob.glob(os.path.join(directory, '*.nc4'))
 
@@ -44,9 +37,59 @@ def _index_files_by_timestamp(directory, years=None):
         var, ts = m.group(1), m.group(2)
         rows.setdefault(ts, {})[var] = f
     if not rows:
-        return pd.DataFrame(columns=['QV', 'U', 'V'])
+        return pd.DataFrame(columns=['timestamp', 'QV', 'U', 'V'])
     df = pd.DataFrame.from_dict(rows, orient='index').sort_index()
     df = df.dropna(subset=['QV', 'U', 'V'])
+    return (df.rename_axis('timestamp').reset_index()
+              [['timestamp', 'QV', 'U', 'V']])
+
+
+def _index_files_by_timestamp(directory, years=None, cache_path=None):
+    """Discover paired (QV, U, V) .nc4 files under `directory`.
+
+    Supports two layouts:
+      - flat:   directory/c1440_NR.inst30mn_3d_{VAR}_Nv.{YYYYMMDD}_{HHMM}z.nc4
+      - NCCS:   directory/inst30mn_3d_{VAR}_Nv/Y{YYYY}/M{MM}/D{DD}/c1440_NR.*.nc4
+        e.g. /css/g5nr/Ganymed/7km/c1440_NR/DATA/0.0625_deg/inst
+
+    `years`: optional iterable of int years (e.g. [2005, 2006]) to filter
+    after scanning. Filter is applied in-memory so a single cache covers any
+    year subset.
+
+    `cache_path`: parquet sidecar to read/write. Default
+    `<directory>/.g5nr_file_index.parquet`. Pass ``False`` to disable caching;
+    if the path is on a read-only filesystem the cache is silently skipped.
+    Delete the file to force a rescan.
+    """
+    if cache_path is None:
+        cache_path = os.path.join(directory, _INDEX_CACHE_NAME)
+
+    df = None
+    if cache_path and os.path.exists(cache_path):
+        try:
+            df = pd.read_parquet(cache_path)
+        except Exception as exc:
+            warnings.warn(
+                f'Could not read file index cache {cache_path!r}: {exc}; '
+                f'will rescan.')
+            df = None
+
+    if df is None:
+        df = _scan_files(directory)
+        if cache_path and len(df) > 0:
+            try:
+                df.to_parquet(cache_path)
+            except (OSError, PermissionError) as exc:
+                warnings.warn(
+                    f'Could not write file index cache to {cache_path!r}: '
+                    f'{exc}; loader will rescan on each invocation.')
+
+    if len(df) == 0:
+        return pd.DataFrame(columns=['QV', 'U', 'V'])
+
+    if years:
+        wanted = {int(y) for y in years}
+        df = df[df['timestamp'].str[:4].astype(int).isin(wanted)]
     return df[['QV', 'U', 'V']].reset_index(drop=True)
 
 
