@@ -8,6 +8,12 @@ except ImportError as _e:
     warnings.warn(f'sea_raft unavailable (skipping): {_e}')
 
 try:
+    from .waft import WAFT
+except ImportError as _e:
+    import warnings
+    warnings.warn(f'waft unavailable (skipping): {_e}')
+
+try:
     from .flownet import *
 except ImportError as _e:
     import warnings

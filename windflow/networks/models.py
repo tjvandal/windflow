@@ -16,6 +16,9 @@ def get_flow_model(model_name, small=True, scheduler_total_steps=500000):
     elif model_name == "sea_raft":
         from . import SEARAFT
         model = SEARAFT(log_step=100, scheduler_total_steps=scheduler_total_steps)
+    elif model_name == "waft":
+        from . import WAFT
+        model = WAFT(log_step=100, scheduler_total_steps=scheduler_total_steps)
     elif model_name == "maskflownet":
         from . import MaskFlownet
         model = MaskFlownet(in_ch=1)
