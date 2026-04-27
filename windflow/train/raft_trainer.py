@@ -88,8 +88,8 @@ class RAFTTrainer(BaseTrainer):
                 self.scheduler.step()
 
 
+            self.log_scalar(loss, 'total_loss', train)
             if log and (self.rank == 0):
-                self.log_scalar(loss, 'total_loss', train)
                 self.log_flow_grid(labels[:,0], 'label', train)
                 self.log_image_grid(I0, 'data/I0', train)
                 self.log_image_grid(I1, 'data/I1', train)

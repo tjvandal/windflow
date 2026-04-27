@@ -66,11 +66,8 @@ class BaseTrainer(LightningModule):
         return None  # inference ?
 
     def log_scalar(self, x, name):
-        # tfwriter = self.get_tfwriter(train)
-        # tfwriter.add_scalar(name, x, self.global_step)
-        logger = self.logger.experiment
         prefix = self.mode
-        logger.log({f"{prefix}/{name}": x})
+        self.log(f"{prefix}/{name}", x, on_step=True, on_epoch=False, rank_zero_only=True)
 
     def log_image_grid(self, img, name, N=4):
         """
@@ -79,16 +76,17 @@ class BaseTrainer(LightningModule):
         # tfwriter = self.get_tfwriter(train)
         logger = self.logger.experiment
         prefix = self.mode
-        img_grid = torchvision.utils.make_grid(img[:N])
+        img_grid = torchvision.utils.make_grid(img[:N], normalize=True, scale_each=True)
         logimg = wandb.Image(img_grid)
-        logger.log({f"{prefix}/{name}": logimg})
+        logger.log({f"{prefix}/{name}": logimg}, commit=False)
 
     def log_flow_grid(self, flows, name, N=4):
         prefix = self.mode
         logger = self.logger.experiment
-        U_grid = torchvision.utils.make_grid(flows[:N, :1])
-        V_grid = torchvision.utils.make_grid(flows[:N, 1:])
+        U_grid = torchvision.utils.make_grid(flows[:N, :1], normalize=True, scale_each=True)
+        V_grid = torchvision.utils.make_grid(flows[:N, 1:], normalize=True, scale_each=True)
         intensity = (U_grid**2 + V_grid**2) ** 0.5
+        intensity = intensity / (intensity.max() + 1e-8)
         # tfwriter.add_image(f'{name}/U', scale_image(U_grid), self.global_step)
         # tfwriter.add_image(f'{name}/V', scale_image(V_grid), self.global_step)
         # tfwriter.add_image(f'{name}/intensity', scale_image(intensity), self.global_step)
@@ -96,7 +94,7 @@ class BaseTrainer(LightningModule):
         logs[f"{prefix}/{name}/U"] = wandb.Image(U_grid)
         logs[f"{prefix}/{name}/V"] = wandb.Image(V_grid)
         logs[f"{prefix}/{name}/Intensity"] = wandb.Image(intensity)
-        logger.log(logs)
+        logger.log(logs, commit=False)
 
     def step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
         raise NotImplementedError

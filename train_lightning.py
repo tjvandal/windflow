@@ -10,6 +10,8 @@ from pytorch_lightning.plugins.environments import (
     SLURMEnvironment,
 )
 
+_IN_SLURM = 'SLURM_NODEID' in os.environ
+
 import torch
 
 torch.cuda.empty_cache()
@@ -34,6 +36,7 @@ def train_net(params, rank=0):
         params["data_path"],
         scale_factor=params["scale_input"],
         frames=params["input_frames"],
+        levels=params["levels"],
     )
 
     data_params = {
@@ -44,7 +47,10 @@ def train_net(params, rank=0):
     training_generator = data.DataLoader(dataset_train, **data_params)
     val_generator = data.DataLoader(dataset_valid, **data_params)
 
-    model = get_flow_model(params["model_name"], small=False)
+    model = get_flow_model(
+        params["model_name"], small=False,
+        scheduler_total_steps=params["max_iterations"],
+    )
 
     logger = pl.loggers.WandbLogger(
         project=params["project"],
@@ -62,21 +68,21 @@ def train_net(params, rank=0):
         max_epochs=params["max_iterations"] // train_iters,
         logger=logger,
         accelerator="gpu",
-        gradient_clip_val=2.0,
+        gradient_clip_val=1.0,
         devices=params["n_gpus"],
         num_nodes=params["n_nodes"],
         limit_val_batches=1,
         limit_train_batches=train_iters,
-        log_every_n_steps=100,
+        log_every_n_steps=1,
         default_root_dir=params["model_path"],
         callbacks=[checkpoint_callback],
-        # detect_anomaly=True,
+        detect_anomaly=True,
         # gradient_clip_val=0.5,
         # gradient_clip_algorithm="value",
         # auto_lr_find=True,
         strategy=pl.strategies.DDPStrategy(find_unused_parameters=True),
-        plugins=[SLURMEnvironment(auto_requeue=False)],
-        precision="16-mixed",
+        plugins=[SLURMEnvironment(auto_requeue=False)] if _IN_SLURM else [],
+        precision="bf16-mixed",
         # accumulate_grad_batches=conf.trainer.accumulate_grad_batches,
     )
 
@@ -124,6 +130,12 @@ if __name__ == "__main__":
     parser.add_argument("--n_gpus", default=1, type=int)
     parser.add_argument("--n_nodes", default=1, type=int)
     parser.add_argument("--loss", default="L1", type=str)
+    parser.add_argument(
+        "--levels",
+        default=None,
+        type=lambda s: [int(x) for x in s.split(",")] if s else None,
+        help="Comma-separated vertical level indices (e.g. '64' or '60,64,68'). Default: all levels.",
+    )
 
     args = parser.parse_args()
     train_net(vars(args))

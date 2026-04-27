@@ -27,6 +27,7 @@ dependencies:
   - netcdf4
   - opencv
   - zarr
+  - xbatcher
   - mpi4py
   - voila
   - pip

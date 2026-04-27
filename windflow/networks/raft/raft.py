@@ -28,16 +28,18 @@ class RAFT(BaseTrainer):
     def __init__(
         self,
         log_step=100,
-        iters=12,
+        iters=24,
         small=False,
         lr=1e-4,
         dropout=0.0,
         alternate_corr=False,
+        scheduler_total_steps=500000,
     ):
         super().__init__(lr=lr)
         self.dropout = dropout
         self.log_step = log_step
         self.iters = iters
+        self.scheduler_total_steps = scheduler_total_steps
         # super(RAFT, self).__init__()
         # self.args = args
 
@@ -176,11 +178,21 @@ class RAFT(BaseTrainer):
         return flow_predictions
 
     def configure_optimizers(self):
-        # set optimizer
-        optimizer = torch.optim.Adam(
+        optimizer = torch.optim.AdamW(
             self.parameters(), lr=self.lr, weight_decay=1e-4, eps=1e-8
         )
-        return optimizer
+        scheduler = torch.optim.lr_scheduler.OneCycleLR(
+            optimizer,
+            max_lr=self.lr,
+            total_steps=self.scheduler_total_steps,
+            pct_start=0.05,
+            cycle_momentum=False,
+            anneal_strategy="linear",
+        )
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {"scheduler": scheduler, "interval": "step"},
+        }
 
     # def step(self, inputs, labels, flow_init=None, log=False, train=True):
     def step(self, batch, batch_idx):
