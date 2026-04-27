@@ -44,6 +44,7 @@ def train_net(params, rank=0):
         "batch_size": params["batch_size"],
         "shuffle": True,
         "num_workers": 8,
+        "persistent_workers": True,
     }
     training_generator = data.DataLoader(dataset_train, **data_params)
     val_generator = data.DataLoader(dataset_valid, **data_params)

@@ -204,20 +204,29 @@ class G5NRXBatcherFlows(data.Dataset):
         return pair_idx, lev_idx, patch_idx
 
     def _ensure_handles(self):
+        # Allocate one slot per (var, timestep); files are opened on first
+        # _get_handle and cached for the rest of the worker's lifetime. This
+        # keeps fd usage proportional to indices actually visited per epoch
+        # rather than O(N_timesteps).
         if self._handles is not None:
             return
-        self._handles = {
-            'QV': [xr.open_dataset(f, engine='h5netcdf')['QV'] for f in self.df['QV']],
-            'U':  [xr.open_dataset(f, engine='h5netcdf')['U']  for f in self.df['U']],
-            'V':  [xr.open_dataset(f, engine='h5netcdf')['V']  for f in self.df['V']],
-        }
+        n = len(self.df)
+        self._handles = {'QV': [None] * n, 'U': [None] * n, 'V': [None] * n}
+
+    def _get_handle(self, var, idx):
+        slot = self._handles[var]
+        h = slot[idx]
+        if h is None:
+            h = xr.open_dataset(self.df[var].iloc[idx], engine='h5netcdf')[var]
+            slot[idx] = h
+        return h
 
     def _read_var(self, var, pair_idx, lev_idx, lat0, lon0):
         lat_start = self._lat_start + lat0
         lat_stop = lat_start + self.size
         out = []
         for f in range(self.frames):
-            arr = self._handles[var][pair_idx + f].isel(
+            arr = self._get_handle(var, pair_idx + f).isel(
                 time=0, lev=lev_idx,
                 lat=slice(lat_start, lat_stop),
                 lon=slice(lon0, lon0 + self.size),
@@ -236,8 +245,8 @@ class G5NRXBatcherFlows(data.Dataset):
             u = self._read_var('U', pair_idx, phys_lev, lat0, lon0)
             v = self._read_var('V', pair_idx, phys_lev, lat0, lon0)
 
-            t0 = self._handles['QV'][pair_idx]['time'].values[0]
-            t1 = self._handles['QV'][pair_idx + 1]['time'].values[0]
+            t0 = self._get_handle('QV', pair_idx)['time'].values[0]
+            t1 = self._get_handle('QV', pair_idx + 1)['time'].values[0]
             if t1 - t0 != np.timedelta64(30, 'm'):
                 return self.__getitem__((idx + 1) % len(self))
 
